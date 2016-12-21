@@ -12,8 +12,9 @@
 #     AWS_SECRET_ACCESS_KEY : aws-cli
 #
 #     DRY_RUN : dryrunモードで実行する
-#     STAGE_LIST : 対象のTagNameパターンを指定、改行で複数指定可能
-#     EXCLUDE_STAGE : 除外したいTagNameパターンを指定
+#     STAGE_LIST : 対象のTagNameパターンを指定。改行で複数指定可能 ("_STAGE_LIST" を含むインスタンスが対象)
+#     EXCLUDE_STAGE : 除外したいTagNameパターンを指定。 (e.g. egg, steging... "_EXCLUDE_STAGE" を含むインスタンスが対象)。既存のインスタンス命名ルール/運用維持用。
+#     EXCLUDE_WORDS : 除外したいTagNameパターンを指定。改行で複数指定可能 (e.g. hmaster,kafka...)
 #
 ##################################################
 set -e 
@@ -54,11 +55,22 @@ do
 	instance_ids=''
 	for instance_json in ${INSTANCES_JSON}
 	do
+		has_exclude_word='FALSE'
 		### 実行対象instance_idの判別
 		tag_name_exists=`echo -n "${instance_json}" | jq -r --arg stage "_${stage}" 'select(contains({TagName:$stage}))' | wc -l`
 		exclude_tag_name_exists=`echo -n "${instance_json}" | jq -r --arg stage "_${EXCLUDE_STAGE}" 'select(contains({TagName:$stage}))' | wc -l`
 		state_running_exists=`echo -n "${instance_json}" | jq -r 'select(.State == "running")' | wc -l`
-		if [ ${tag_name_exists} -eq 0 -o ${exclude_tag_name_exists} -ne 0 -o ${state_running_exists} -eq 0 ];then
+		### EXCLUDE_WORDS を一つでも含んでいたら停止対象外
+		for exclude_word in ${EXCLUDE_WORDS}
+		do
+			exclude_word_exists=`echo -n "${instance_json}" | jq -r --arg excludeWord "${exclude_word}" 'select(contains({TagName:$excludeWord}))' | wc -l`
+			if [ ${exclude_word_exists} -ne 0 ];then
+				has_exclude_word='TRUE'
+				break
+			fi
+		done
+
+		if [ ${tag_name_exists} -eq 0 -o ${exclude_tag_name_exists} -ne 0 -o ${state_running_exists} -eq 0 -o ${has_exclude_word} == 'TRUE' ];then
 			continue
 		fi
 
